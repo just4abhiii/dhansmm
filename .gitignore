@@ -1,0 +1,21 @@
+# Environment & sensitive configs
+.env
+.env.*
+*.env
+ecosystem.config.cjs
+backend/ecosystem.config.cjs
+
+# Backups
+frontend-backup-*
+frontend.backup-*
+*.bak*
+*.dump
+*.sql
+
+# Logs
+logs/
+*.log
+
+# Node / OS
+node_modules/
+.DS_Store

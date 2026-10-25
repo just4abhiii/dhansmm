@@ -1,0 +1,12 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {dhanUsesCustomComments:isCustom}=require('./dhansmm-comment-mode.cjs');
+test('random provider comments keep line entry closed',()=>assert.equal(isCustom('comments',{serviceName:'Instagram Random Comments'}),false));
+test('emoji provider comments keep line entry closed',()=>assert.equal(isCustom('comments',{serviceName:'Instagram Comments (Emoji) Recommended'}),false));
+test('custom provider comments open line entry',()=>assert.equal(isCustom('comments',{serviceName:'Instagram Custom Comments'}),true));
+test('switching custom to random closes line entry',()=>{assert.equal(isCustom('comments',{serviceName:'Custom Comments'}),true);assert.equal(isCustom('comments',{serviceName:'Random Comments'}),false)});
+test('provider random mode wins over explicit custom type',()=>assert.equal(isCustom('custom_comments',{serviceName:'Random Comments'}),false));
+test('unlinked comments do not demand customer text',()=>assert.equal(isCustom('comments',{}),false));
+test('separate custom comments with custom provider open line entry',()=>assert.equal(isCustom('custom_comments',{serviceName:'Instagram Custom Comments'}),true));
+test('separate custom comments with normal provider keep line entry closed',()=>assert.equal(isCustom('custom_comments',{serviceName:'Instagram Comments'}),false));
+test('unlinked separate custom comments keep line entry closed',()=>assert.equal(isCustom('custom_comments',{}),false));

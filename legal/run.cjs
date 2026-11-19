@@ -1,0 +1,1 @@
+const c=require("/var/www/dhansmm/backend/ecosystem.config.cjs").apps[0].env;process.env.TELEGRAM_BOT_TOKEN=c.TELEGRAM_BOT_TOKEN;process.env.TELEGRAM_ADMIN_CHAT_ID=c.TELEGRAM_ADMIN_CHAT_ID;import("/var/www/dhansmm/legal/server.mjs");

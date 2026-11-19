@@ -1,3 +1,4 @@
+import {dhanWebhook,getDhanReport} from "./dhan-admin-bot.mjs";
 import { createRequire as __bannerCrReq } from 'node:module';
 import __bannerPath from 'node:path';
 import __bannerUrl from 'node:url';
@@ -46734,6 +46735,18 @@ router3.post("/:table", async (req, res) => {
     if (USER_SCOPED_TABLES.has(table) && req.user.role !== "admin") {
       row.user_id = req.user.sub;
     }
+    // Auto-create provider record when inserting provider_accounts
+    if (table === "provider_accounts" && row.provider_id) {
+      const pid = String(row.provider_id).trim();
+      const purl = String(row.api_url || "").trim();
+      const pkey = String(row.api_key || "").trim();
+      const pname = String(row.name || pid).trim();
+      await pool2.query(
+        `INSERT INTO public.providers (id, name, api_url, api_key) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET api_url = EXCLUDED.api_url, api_key = EXCLUDED.api_key, updated_at = now()`,
+        [pid, pname, purl, pkey]
+      ).catch(() => {});
+    }
     const cols = Object.keys(row).filter((c) => /^[a-zA-Z0-9_]+$/.test(c));
     if (cols.length === 0) continue;
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -47249,6 +47262,7 @@ async function testTelegram() {
 // src/routes/functions.ts
 var router5 = (0, import_express5.Router)();
 router5.use(authMiddleware);
+router5.post("/admin-provider-report", requireAuth, async (req,res)=>{if(!["admin","moderator"].includes(req.user.role))return res.status(403).json({error:"Forbidden"});try{return res.json(await getDhanReport(getPool()));}catch{return res.status(503).json({error:"Report unavailable or timed out. Please refresh."});}});
 router5.post("/send-telegram-notification", requireAuth, async (req, res) => {
   const { message, photo_url, chat_id } = req.body ?? {};
   if (!message) return res.status(400).json({ error: "message required" });
@@ -48424,6 +48438,7 @@ async function pollOrganicRunStatus(opts = {}) {
     SET status = 'pending', started_at = NULL, error_message = 'Stuck without provider order \u2014 retrying'
     WHERE status = 'started'
       AND provider_order_id IS NULL
+      AND COALESCE(error_message, '') NOT LIKE '[Dispatch uncertain]%'
       AND started_at < now() - interval '30 minutes'
   `);
   await pool2.query(`
@@ -48482,7 +48497,7 @@ async function pollOrganicRunStatus(opts = {}) {
       const remains = order?.remains != null ? parseInt(String(order.remains), 10) : null;
       const charge = order?.charge != null ? parseFloat(String(order.charge)) : null;
       const startCount = order?.start_count != null ? parseInt(String(order.start_count), 10) : null;
-      const isCompleted = providerStatus.includes("complet") || providerStatus === "done" || remains !== null && !isNaN(remains) && remains === 0;
+      const isCompleted = providerStatus.includes("complet") || providerStatus === "done";
       const isFailed = providerStatus.includes("cancel") || providerStatus.includes("fail") || providerStatus.includes("error") || providerStatus === "refunded";
       checked++;
       await pool2.query(
@@ -48568,10 +48583,13 @@ async function executeOrganicRuns(opts = {}) {
     JOIN public.providers p                 ON p.id  = s.provider_id
     WHERE ors.status        = 'pending'
       AND ors.provider_order_id IS NULL
+      AND COALESCE(ors.error_message, '') NOT LIKE '[Dispatch uncertain]%'
       AND ors.scheduled_at <= now()
       AND eo.status NOT IN ('paused','cancelled','refunded')
       AND eoi.status NOT IN ('paused','cancelled','completed')
-    ORDER BY ors.scheduled_at
+    ORDER BY row_number() OVER (
+      PARTITION BY eo.id ORDER BY ors.scheduled_at, ors.id
+    ), ors.scheduled_at, ors.id
     LIMIT $1
   `, [limit]);
   if (!dueRows.rows.length) return { processed: 0, skipped: 0, failed: 0, queued: 0, results: [] };
@@ -48656,8 +48674,9 @@ async function executeOrganicRuns(opts = {}) {
           AND  ors.status              IN ('started', 'processing')
           AND  ors.provider_order_id   IS NOT NULL
           AND  ors.id                  != $3
+          AND  eoi.service_id           = $4
         LIMIT 1
-      `, [acct.id, row.link, row.run_id]);
+      `, [acct.id, row.link, row.run_id, row.service_id]);
       if (alreadyActive.rows.length) {
         busyErrors.push(`${acct.provider_id}: already processing same link (internal skip)`);
         continue;
@@ -48717,9 +48736,10 @@ async function executeOrganicRuns(opts = {}) {
     if (providerOrderId && successAcct) {
       await pool2.query(`
         UPDATE public.organic_run_schedule
-        SET provider_order_id = $1, provider_account_id = $2, provider_account_name = $3
+        SET provider_order_id = $1, provider_account_id = $2, provider_account_name = $3,
+            provider_requested_quantity = $5, provider_history_order_id = $1
         WHERE id = $4
-      `, [providerOrderId, successAcct.id, successAcct.provider_id, row.run_id]);
+      `, [providerOrderId, successAcct.id, successAcct.name || successAcct.provider_id, row.run_id, qty]);
       await pool2.query(`UPDATE public.provider_accounts SET last_used_at = now() WHERE id = $1`, [successAcct.id]);
       processed++;
       results.push({ run_id: row.run_id, run_number: row.run_number, success: true, provider_order_id: providerOrderId, account: successAcct.provider_id });
@@ -48910,91 +48930,8 @@ router7.post("/oxapay", async (req, res) => {
     console.error("OxaPay webhook credit error:", err.message);
   }
 });
-router7.post("/telegram", async (req, res) => {
-  res.json({ ok: true });
-  const update = req.body ?? {};
-  const msg = update.message ?? update.edited_message;
-  if (!msg) return;
-  const chatId = String(msg.chat?.id ?? "");
-  const text2 = String(msg.text ?? "").trim().toLowerCase();
-  const envAdminId = process.env["TELEGRAM_ADMIN_CHAT_ID"] ?? "";
-  const allowedIds = envAdminId.split(",").map((s) => s.trim()).concat(["8148546704", "8766641148"]);
-  if (!chatId || !allowedIds.includes(chatId)) return;
-  const token = process.env["TELEGRAM_BOT_TOKEN"] ?? "";
-  if (!token) return;
-  const sendReply = async (html) => {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML" }),
-      signal: AbortSignal.timeout(8e3)
-    }).catch(() => {
-    });
-  };
-  if (text2 === "/start") {
-    await sendReply(
-      `\u{1F44B} <b>DhanSMM Admin Bot</b>
+router7.post("/telegram", async (req,res)=>dhanWebhook(req,res,getPool()));
 
-Available commands:
-\u{1F4B0} <code>/bal</code> or <code>/b</code> \u2014 Check provider balances`
-    );
-    return;
-  }
-  if (text2 === "/bal" || text2 === "/b" || text2.startsWith("/bal ") || text2.startsWith("/b ")) {
-    await sendReply("\u23F3 Checking provider balances...");
-    const pool2 = getPool();
-    const accounts = await pool2.query(
-      `SELECT id, api_url, api_key, provider_id FROM public.provider_accounts WHERE is_active = true ORDER BY provider_id`
-    );
-    if (!accounts.rows.length) {
-      await sendReply("\u274C No active provider accounts found.");
-      return;
-    }
-    const LOW_BALANCE_USD = 1;
-    const lines = [`\u{1F4B0} <b>Provider Balances</b>
-`];
-    for (const acct of accounts.rows) {
-      try {
-        const form = new URLSearchParams({ key: acct.api_key, action: "balance" });
-        const resp = await fetch(acct.api_url, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: form.toString(),
-          signal: AbortSignal.timeout(12e3)
-        });
-        const txt = await resp.text();
-        let json2 = {};
-        try {
-          json2 = JSON.parse(txt);
-        } catch {
-          json2 = { error: txt };
-        }
-        if (json2?.error && !json2?.balance) {
-          lines.push(`\u274C <b>${acct.provider_id}</b>: ${String(json2.error).slice(0, 60)}`);
-        } else {
-          const balance = parseFloat(json2?.balance ?? json2?.Balance ?? "0") || 0;
-          const currency = json2?.currency || json2?.Currency || "USD";
-          const isInr = currency.toUpperCase() === "INR";
-          const symbol = isInr ? "\u20B9" : "$";
-          const lowThr = isInr ? 83 : 1;
-          const midThr = isInr ? 500 : 5;
-          const emoji = balance < lowThr ? "\u{1F534}" : balance < midThr ? "\u{1F7E1}" : "\u{1F7E2}";
-          lines.push(`${emoji} <b>${acct.provider_id}</b>: ${symbol}${balance.toFixed(2)} <i>${currency}</i>`);
-          await pool2.query(
-            `UPDATE public.provider_accounts SET balance=$1, balance_currency=$2, balance_checked_at=now(), last_balance_error=NULL WHERE id=$3`,
-            [balance, currency, acct.id]
-          );
-        }
-        await new Promise((r) => setTimeout(r, 300));
-      } catch {
-        lines.push(`\u26A0\uFE0F <b>${acct.provider_id}</b>: Timeout / Network error`);
-      }
-    }
-    lines.push(`
-\u{1F550} <i>Checked at ${(/* @__PURE__ */ new Date()).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</i>`);
-    await sendReply(lines.join("\n"));
-  }
-});
 var webhooks_default = router7;
 
 // src/routes/index.ts
@@ -49146,7 +49083,10 @@ app_default.listen(port, (err) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+  let organicWorkerRunning = false;
   const runWorker = async () => {
+    if (organicWorkerRunning) return;
+    organicWorkerRunning = true;
     try {
       const result = await executeOrganicRuns({ limit: 100 });
       if (result.processed > 0 || result.failed > 0) {
@@ -49154,6 +49094,8 @@ app_default.listen(port, (err) => {
       }
     } catch (err2) {
       logger.error({ err: err2 }, "organic-run-worker error");
+    } finally {
+      organicWorkerRunning = false;
     }
   };
   runWorker();
@@ -49229,7 +49171,7 @@ Send /bal to recheck.`
       logger.error({ err: err2 }, "supabase-backup-worker: unexpected error");
     }
   };
-  setTimeout(backupWorker, 2 * 60 * 1e3);
+  setTimeout(backupWorker, 6 * 60 * 60 * 1e3);
   setInterval(backupWorker, 6 * 60 * 60 * 1e3);
 });
 /*! Bundled license information:

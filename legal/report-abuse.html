@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="dhan-static" content="1"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Report Abuse | DhanSMM</title><meta name="description" content="Report Abuse of DhanSMM"><link rel="icon" href="/favicon.png"><style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f6f8fb;color:#0f1f2e;line-height:1.7}
+header{background:#071a2b;color:#fff;padding:16px 20px}header a{color:#fff;text-decoration:none;font-weight:700;font-size:18px}
+main{max-width:820px;margin:0 auto;padding:28px 20px 60px}h1{font-size:30px;margin:8px 0}h2{font-size:19px;margin:28px 0 6px}
+.box{background:#fff;border:1px solid #e3e8ef;border-radius:14px;padding:24px}.warn{background:#fff3f3;border:1px solid #f3b4b4;border-radius:10px;padding:12px 14px}
+footer{text-align:center;font-size:13px;color:#667;padding:20px}footer a{color:#0b5bd3;margin:0 6px}
+input,textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cfd6df;border-radius:8px;font:inherit;margin:4px 0 14px}
+button{background:#071a2b;color:#fff;border:0;border-radius:999px;padding:12px 22px;font-weight:600;cursor:pointer}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #dde;padding:6px;vertical-align:top;text-align:left}</style></head><body><header><a href="/">DhanSMM</a></header><main><h1>Report Abuse &amp; Grievance Officer</h1><div class="box">
+<p>If any DhanSMM user has used our platform to target your brand, company or account with fraud, spam, fake engagement or any illegal activity, report it here. Every report is reviewed and the concerned user's records (IP, device, consent logs, orders, payments) are preserved and can be shared with police, cyber cell or the affected company as per law.</p>
+<p><b>Grievance Officer:</b> DhanSMM Compliance Team — <a href="mailto:dhansmmofficial@gmail.com">dhansmmofficial@gmail.com</a>. We acknowledge complaints within 24 hours and act within 15 days as per the IT (Intermediary Guidelines) Rules, 2021.</p>
+<form id="f"><label>Your name / company *</label><input name="reporter_name" required maxlength="150">
+<label>Your email *</label><input name="reporter_email" type="email" required maxlength="200">
+<label>Abuse type *</label><select name="abuse_type"><option>Fraud against company/brand</option><option>Fake engagement / botting</option><option>Spam / harassment</option><option>Copyright / impersonation</option><option>Other</option></select>
+<label>Target link / account that was attacked *</label><input name="target_link" required maxlength="500">
+<label>Order ID or suspect username/email (if known)</label><input name="suspect_info" maxlength="300">
+<label>Details and proof links *</label><textarea name="details" rows="6" required maxlength="5000"></textarea>
+<button type="submit">Submit report</button><p id="m"></p></form></div>
+<script>document.getElementById('f').onsubmit=async e=>{e.preventDefault();const m=document.getElementById('m');m.textContent='Sending...';
+const d=Object.fromEntries(new FormData(e.target));try{const r=await fetch('/legal-api/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});const j=await r.json();
+if(r.ok){e.target.reset();m.textContent='Report received. Reference: '+j.id+'. Our team will contact you by email.';}else m.textContent=j.error||'Failed, please email dhansmmofficial@gmail.com';}catch(x){m.textContent='Failed, please email dhansmmofficial@gmail.com';}}</script></main><footer><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refund">Refunds</a><a href="/report-abuse">Report Abuse</a><br>© 2026 DhanSMM. All rights reserved. | Contact: <a href="mailto:dhansmmofficial@gmail.com">dhansmmofficial@gmail.com</a></footer></body></html>
